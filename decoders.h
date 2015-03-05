@@ -128,7 +128,7 @@ public:
 #define SYNC_WIDTH 500 // min duration of the positive half of a sync bit (uS)
 #define MAX_SYNC_WIDTH 670
 #define ONE_WIDTH  380
-#define ZERO_WIDTH 190
+#define ZERO_WIDTH 150
 #define BIT_WIDTH 1200 // total duration of a one-bit pulse
 #define NUM_SYNCS 4
 
@@ -170,6 +170,10 @@ class AcuRiteDecoder : public DecodeOOK {
 	  return 0;
 	}
 	state = T2; // T2: expecting zero-pulse for 0-bit of 584-800mS
+      } else {
+        // Again, bad data.
+        state = UNKNOWN;
+        ret = -1;
       }
       break;
 
