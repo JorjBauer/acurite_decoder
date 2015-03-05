@@ -3,6 +3,8 @@
 
 #define RX_PIN 14    // 14 == A0. Must be one of the analog pins, b/c of the analog comparator being used.
 
+#undef DEBUG
+
 AcuRiteDecoder adx;
 
 byte packetBuffer[60], packetFill;
@@ -38,12 +40,14 @@ static void setupPinChangeInterrupt () {
 
 void addData(const byte *buf, byte len)
 {
+#ifdef DEBUG
   Serial.print("addData: ");
     for (byte i = 0; i < len; ++i) {
         Serial.print(' ');
         Serial.print((int) buf[i], HEX);
     }
     Serial.println();
+#endif
   
     if (packetFill + len < sizeof(packetBuffer)) {
         memcpy(packetBuffer + packetFill, buf, len);
@@ -161,20 +165,23 @@ byte calcParity(byte b)
 
 void DecodePacket(const byte *data)
 {
+#ifdef DEBUG
   Serial.print("DecodePacket: ");
     for (byte i = 0; i < 7; i++) {
         Serial.print(' ');
         Serial.print((int) data[i], HEX);
     }
     Serial.println();
-
+#endif
   
   
   // Check parity bits. (Byte 0 and byte 7 have no parity bits.)              
     for (int i=1; i<=5; i++) {
       if (calcParity(data[i]) != (data[i] & 0x80)) {
+#ifdef DEBUG
         Serial.print("Parity failure in byte ");
         Serial.println(i);
+#endif
         return;
       }
     }
@@ -185,10 +192,12 @@ void DecodePacket(const byte *data)
       cksum += data[i];
     }
     if ((cksum & 0xFF) != data[6]) {
+#ifdef DEBUG
       Serial.print("Checksum failure - calcd 0x");
       Serial.print(cksum, HEX);
       Serial.print(", expected 0x");
       Serial.println(data[6], HEX);
+#endif
       return;
     }
 
