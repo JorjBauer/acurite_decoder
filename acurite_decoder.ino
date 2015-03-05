@@ -1,5 +1,6 @@
 #include <SPI.h>
 #include "decoders.h"
+#include "rfm69_constants.h"
 
 #define RX_PIN 14    // 14 == A0. Must be one of the analog pins, b/c of the analog comparator being used.
 
@@ -113,28 +114,58 @@ uint16_t xfer16(uint16_t cmd)
   return reply;
 }
 
-
-// see http://jeelabs.org/2011/01/27/ook-reception-with-rfm12b-2/
-// ... although this has been modified somewhat in order to receive from the AcuRite sensors; see
-// see http://hackaday.io/project/4490-re-purposing-acurite-temperature-sensors/log/14666-receiving-the-data
-static void rf12_init_OOK () {
-    xfer16(0x8017); // 8027    868 Mhz;disabel tx register; disable RX
-                          //         fifo buffer; xtal cap 12pf, same as xmitter
-                          // 8017    433 MHz; disable tx; disable rx fifo; xtal cap 12pf
-
-    xfer16(0x82c0); // 82C0    enable receiver; enable basebandblock 
-    xfer16(0xA68a); // A68A    jorj: a620
-    xfer16(0xc655); // C691    c691 datarate 2395 kbps 0xc647 = 4.8kbps
-    xfer16(0x946a); // 9489    VDI; FAST;270khz;GAIn -6db; DRSSI 91dbm
+uint8_t rfm69_read(uint8_t reg)
+{
+  uint8_t reply;
+  
+  SPI.beginTransaction(SPI_settings);
+  if (selPin != -1)
+    digitalWrite(selPin, LOW);
     
-    xfer16(0xC220); // C220    datafiltercommand; ** not documented cmd 
-    xfer16(0xCA00); // CA00    FiFo and resetmode cmd; FIFO fill disabeld
-    xfer16(0xC473); // C473    AFC run only once; enable AFC; enable
-                          //         frequency offset register; +3 -4
-    xfer16(0xCC67); // CC67    pll settings command
-    xfer16(0xB800); // TX register write command not used
-    xfer16(0xC800); // disable low dutycycle 
-    xfer16(0xC040); // 1.66MHz,2.2V not used see 82c0  
+  SPI.transfer(reg);
+  reply = SPI.transfer(0x00);
+    
+  if (selPin != -1)
+    digitalWrite(selPin, HIGH);
+    
+  SPI.endTransaction();
+  
+  return reply;
+}
+
+void rfm69_write(uint8_t reg, uint8_t val)
+{
+  SPI.beginTransaction(SPI_settings);
+  if (selPin != -1)
+    digitalWrite(selPin, LOW);
+    
+  SPI.transfer(reg | 0x80); // write bit
+  SPI.transfer(val);
+    
+  if (selPin != -1)
+    digitalWrite(selPin, HIGH);
+    
+  SPI.endTransaction();
+}
+
+static void rf69_init_OOK () {
+//  uint8_t dev_id = rfm69_read(RegVersion);
+//  if (dev_id != 0x00 || dev_id != 0xff)
+//    return;
+
+  rfm69_write(RegOpMode, RegOpModeStandby);
+  rfm69_write(RegDataModul, RegDataModulContinuous | RegDataModulOOK); // Set continuous OOK mode
+  RegBitrateSet(8000); // 4.8kb/s
+  RegFrfSet(433920000); // fundamental frequency = 433.92MHz (really 433.920044 MHz)
+  
+  rfm69_write(RegRxBw, RegRxBwDccFreq4 | RegRxBwOOK50k); // 4% DC cancellation; 50k bandwidth in OOK mode
+  rfm69_write(RegLna, RegLnaZ200 | RegLnaGainSelect12db); // 200 ohm, -6db
+
+  rfm69_write(RegOokPeak,
+   RegOokThreshPeak | RegOokThreshPeakStep0d5 | RegOokThreshPeakDec1c );
+
+  rfm69_write(RegOpMode, RegOpModeRX);
+  rfm69_write(RegAfcFei, RegAfcFeiAfcClear);
 }
 
 void setup () {
@@ -144,8 +175,7 @@ void setup () {
     pinMode(intPin, INPUT);
     digitalWrite(intPin, LOW); // turn off pull-up until it's running properly
     
-    //    rf12_initialize(0, RF12_433MHZ);
-    rf12_init_OOK();
+    rf69_init_OOK();
     
     setupPinChangeInterrupt();
 }
