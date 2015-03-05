@@ -159,11 +159,11 @@ static void rf69_init_OOK () {
 
   rfm69_write(RegOpMode, RegOpModeStandby);
   rfm69_write(RegDataModul, RegDataModulContinuous | RegDataModulOOK); // Set continuous OOK mode
-  RegBitrateSet(8000); // 4.8kb/s
+  RegBitrateSet(8000); // 8.0kb/s
   RegFrfSet(433920000); // fundamental frequency = 433.92MHz (really 433.920044 MHz)
   
   rfm69_write(RegRxBw, RegRxBwDccFreq4 | RegRxBwOOK50k); // 4% DC cancellation; 50k bandwidth in OOK mode
-  rfm69_write(RegLna, RegLnaZ200 | RegLnaGainSelect12db); // 200 ohm, -6db
+  rfm69_write(RegLna, RegLnaZ200 | RegLnaGainSelect12db); // 200 ohm, -12db
 
   rfm69_write(RegOokPeak,
    RegOokThreshPeak | RegOokThreshPeakStep0d5 | RegOokThreshPeakDec1c );
