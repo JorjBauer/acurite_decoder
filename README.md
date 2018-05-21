@@ -1,5 +1,7 @@
 # acurite_decoder
-Arduino code using an RFM12B to demodulate and parse Acurite temperature sensor data.
+Arduino code using an RFM69 to demodulate and parse Acurite temperature sensor data.
+
+An old tag (final-rfm12) has code for doing the same with an RFM12B.
 
 Take a look over here for details:
 
