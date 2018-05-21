@@ -1,10 +1,14 @@
 #include <SPI.h>
 #include "decoders.h"
 #include "rfm69_constants.h"
+#include <RFM69.h>
+#include "local_sprintf.h"
 
 #define RX_PIN 14    // 14 == A0. Must be one of the analog pins, b/c of the analog comparator being used.
 
 #undef DEBUG
+
+#define VERSION "20180520"
 
 AcuRiteDecoder adx;
 
@@ -16,7 +20,9 @@ word last_poll = 0;
 
 SPISettings SPI_settings(2000000, MSBFIRST, SPI_MODE0);
 
-#define intPin 2
+RFM69 radio;
+
+//#define intPin 9
 #define selPin 10
 // MOSI is 11; MISO is 12; SCK is 13.
 
@@ -173,11 +179,13 @@ static void rf69_init_OOK () {
 }
 
 void setup () {
-    Serial.begin(57600);
-    Serial.println("\n[AcuRite decoder]");
+    Serial.begin(115200);
+    Serial.print("\n[AcuRite decoder version ");
+    Serial.print(VERSION);
+    Serial.println("]");
     
-    pinMode(intPin, INPUT);
-    digitalWrite(intPin, LOW); // turn off pull-up until it's running properly
+//    pinMode(intPin, INPUT);
+//    digitalWrite(intPin, LOW); // turn off pull-up until it's running properly
     
     rf69_init_OOK();
     
@@ -193,6 +201,29 @@ byte calcParity(byte b)
   return result ? 0x80 : 0x00;
 }
 
+void PrintSource(const byte *data)
+{
+  Serial.print("Source: ");
+  unsigned long id = ((data[0] & 0x3f) << 7) | (data[1] & 0x7f);
+  Serial.print(id);
+  
+  Serial.print("/");
+  switch (data[0] & 0xC0) {
+  case 0xc0:
+    Serial.print("A");
+    break;
+  case 0x80:
+    Serial.print("B");
+    break;
+  case 0x00:
+    Serial.print("C");
+    break;
+  default:
+    Serial.print("x");
+    break;
+  }
+}
+
 void DecodePacket(const byte *data)
 {
 #ifdef DEBUG
@@ -205,8 +236,11 @@ void DecodePacket(const byte *data)
 #endif
   
   
-  // Check parity bits. (Byte 0 and byte 7 have no parity bits.)              
-    for (int i=1; i<=5; i++) {
+    // Check parity bits. (Byte 0 and byte 7 have no parity bits.)
+    // ... Byte 1 might also not be parity-ing correctly. A new device
+    // I bought in early 2018 has a parity error in byte 1, but
+    // otherwise seems to work correctly.
+    for (int i=2; i<=5; i++) {
       if (calcParity(data[i]) != (data[i] & 0x80)) {
 #ifdef DEBUG
         Serial.print("Parity failure in byte ");
@@ -215,63 +249,95 @@ void DecodePacket(const byte *data)
         return;
       }
     }
-    
-        // Check checksum.                                                          
+
+    // Check checksum.
     unsigned char cksum = 0;
     for (int i=0; i<=5; i++) {
       cksum += data[i];
     }
     if ((cksum & 0xFF) != data[6]) {
-#ifdef DEBUG
-      Serial.print("Checksum failure - calcd 0x");
+      PrintSource(data);
+      Serial.print(" checksum failure - calcd 0x");
       Serial.print(cksum, HEX);
       Serial.print(", expected 0x");
       Serial.println(data[6], HEX);
-#endif
       return;
     }
 
-    Serial.print("Source ID: ");
-    unsigned long id = ((data[0] & 0x3f) << 7) | (data[1] & 0x7f);
-    Serial.println(id);
-    
-    Serial.print("Channel: ");
-    switch (data[0] & 0xC0) {
-      case 0xc0:
-        Serial.println("A");
-        break;
-        case 0x80:
-        Serial.println("B");
-        break;
-        case 0x00:
-        Serial.println("C");
-        break;
-        default:
-        Serial.println("x");
-        break;
+    // If data[2] & 0x80 is set, that's a low battery condition.  At
+    // the same time, data[2] & 0x40 is *not* set (in my sample size
+    // of 1). I'm not sure if that means they always happen together
+    // or not.
+    int battery_low = 0;
+    if ((data[2] & 0xC0) != 0x40) {
+      if (data[2] & 0xC0 == 0x80) {
+	battery_low = 1;
+      } else {
+	PrintSource(data);
+	Serial.print(" abnormal status 0x");
+	Serial.println(data[2] & 0xC0, HEX);
+      }
     }
-    if ((data[2] & 0x7F) != 0x44) {
-      Serial.println("Device signature does not match AcuRite signature 0x44");
+    
+    // Check the signature and warn if it doesn't match.
+    // (I'm assuming this is a signature; it might not be!)
+    if ((data[2] & 0x3F) != 0x04) {
+      PrintSource(data);
+      Serial.print(" Device signature 0x");
+      Serial.print(data[2] & 0x3F, HEX);
+      Serial.println(" does not match AcuRite signature 0x04");
     }
 
+    PrintSource(data);
     if ((data[3] & 0x7F) != 0x7F) {
-      Serial.print("Humidity: ");
+      Serial.print(" Humidity: ");
       Serial.print(data[3] & 0x7f);
-      Serial.println("%");
+      Serial.print("%");
     }
     
     unsigned long t1 = ((data[4] & 0x0F) << 7) | (data[5] & 0x7F);
     float temp = ((float)t1 - (float) 1024) / 10.0;
     
     // add manual calibration values to sensors...
-    if (id == 382) temp += 2.5; // reads humidity as 0x7f (127%)
-    if (id == 4454) temp += 2.5; // reads humidity as 0x10 (16%)
+#if 0
+    unsigned long id = ((data[0] & 0x3f) << 7) | (data[1] & 0x7f);
+    if (id == 382) temp += 3.0;
+    if (id == 4454) temp += 2.6;
+    if (id == 59 || id == 2676) temp += 2.5; // temperature varies substantially from the others
+    if (id == 5296) temp += 3.0;
+#endif
     
-    Serial.print("Temperature: ");
+    Serial.print(" Temperature: ");
     Serial.print(temp);
     Serial.print(" C (");
     Serial.print(temp * 9.0 / 5.0 + 32.0);
-    Serial.println(" F)");
+    Serial.print(" F) battery ");
+
+    if (battery_low) {
+      Serial.println("low");
+    } else {
+      Serial.println("ok");
+    }
+    
+    // relay data we want to see
+     /*
+    if ((data[0] & 0xC0) == 0xC0) { // channel A?
+      byte buf[50];
+      char msg[50];
+      float F = temp * 9.0 / 5.0 + 32.0;
+      cr_sprintf(msg, "A: %f deg", F);
+      buf[0] = 'D';
+      buf[1] = strlen(msg);
+      memcpy(&buf[2], msg, strlen(msg));
+
+      Serial.println("relaying"); 
+      radio.initialize(RF69_433MHZ, 2, 210);
+      radio.receiveDone();
+      radio.send(1, buf, strlen(msg) + 2, false);
+      rf69_init_OOK();
+    }
+      */
+      
 }
 
 void loop () {
